@@ -1,0 +1,280 @@
+"""
+Built-in dataset of ~450K US based users.
+
+"""
+import io
+import math
+import pickle
+import re
+import sys
+import time
+from os import path, makedirs
+import sklearn
+import keras
+import pandas as pd
+from nltk.stem import PorterStemmer
+from nltk.tokenize import word_tokenize
+import tensorflow as tf
+from sklearn.model_selection import train_test_split
+sys.path.insert(0, path.abspath('../../'))
+import numpy as np
+import twgeo.data.reverse_geocode as rg
+from twgeo.data import constants
+
+def _load_data():
+
+    test_data_path = r"/content/drive/MyDrive/pre_data/test_preproceesed_new.csv"
+    train_data_path = r"/content/drive/MyDrive/pre_data/train_preproceesed_new.csv"
+
+    test_data = pd.read_csv(test_data_path, on_bad_lines='skip',  delimiter="\t",engine='python')
+    train_data = pd.read_csv(train_data_path, on_bad_lines='skip', delimiter="\t",engine='python')
+
+    test_df = pd.DataFrame(test_data)
+    train_df = pd.DataFrame(train_data)
+        
+    
+    train_df.columns = train_df.columns.str.strip()
+    test_df.columns = test_df.columns.str.strip()
+
+    # Detecting null values and records
+
+    df_concat = pd.concat([train_df, test_df], axis = 0).reset_index(drop = True)
+    nulls = pd.DataFrame(np.c_[df_concat.isnull().sum(), (df_concat.isnull().sum()/ len(df_concat))*100],
+                        columns = ['# of nulls', '% of nulls'],
+                        index = df_concat.columns)
+
+    for df in [train_df, test_df, df_concat]:
+        df.state.fillna('no_state', inplace = True)
+    for df in [train_df, test_df, df_concat]:
+        df.Preproceesed.fillna('no_TweetText', inplace = True)
+    
+    train_df = df_concat[:train_df.shape[0]]
+    test_df = df_concat[train_df.shape[0]:]
+
+    new_train_df, dev_df = sklearn.model_selection.train_test_split(train_df,train_size=0.75 ,test_size=0.25, random_state=42)
+
+    #print('test df')
+    #print(test_df)
+    #print('train df')
+    #print(new_train_df)
+    #print('dev df')
+    #print(dev_df)
+
+   # dev_df.columns
+    
+    
+    new_train_df = new_train_df.drop(new_train_df.index[new_train_df['state'] == 'state'], inplace = False)
+    test_df = test_df.drop(test_df.index[test_df['state'] == 'state'], inplace = False)   
+    dev_df = dev_df.drop(dev_df.index[dev_df['state'] == 'state'], inplace = False)
+     
+
+    #print(num_values = len(set(test_df['state'])))
+
+    return new_train_df, dev_df, test_df, df_concat
+
+_load_data()
+
+
+def load_state_data():
+
+    new_train_df, dev_df, test_df, df_concat = _load_data()
+    
+    x_train = new_train_df['Preproceesed'].values
+    y_train = new_train_df['state'].values
+    
+    x_test = test_df['Preproceesed'].values
+    y_test = test_df['state'].values
+     
+    x_dev  = dev_df['Preproceesed'].values
+    y_dev  = dev_df['state'].values
+
+   # print('x_train')
+   # print(x_train)
+    
+   # print('y_train')
+   # print(y_train)
+
+   # print('x_dev')
+   # print(x_dev)
+
+   # print('y_dev')
+   # print(y_dev)
+    
+    return x_train, y_train, x_test, y_test, x_dev, y_dev
+
+
+
+import nltk
+nltk.download('stopwords')
+
+def preprocess(z):
+    import re
+    #print (z)
+
+    #remove emoji
+    def remove_emoji(z):
+        emoji_pattern = re.compile("["
+                               u"\U0001F600-\U0001F64F"  # emoticons
+                               u"\U0001F300-\U0001F5FF"  # symbols & pictographs
+                               u"\U0001F680-\U0001F6FF"  # transport & map symbols
+                               u"\U0001F1E0-\U0001F1FF"  # flags (iOS)
+                               u"\U00002500-\U00002BEF"  # chinese char
+                               u"\U00002702-\U000027B0"
+                               u"\U00002702-\U000027B0"
+                               u"\U000024C2-\U0001F251"
+                               u"\U0001f926-\U0001f937"
+                               u"\U00010000-\U0010ffff"
+                               u"\u2640-\u2642"
+                               u"\u2600-\u2B55"
+                               u"\u200d"
+                               u"\u23cf"
+                               u"\u23e9"
+                               u"\u231a"
+                               u"\ufe0f"  # dingbats
+                               u"\u3030"
+                               "]+", flags=re.UNICODE)
+        return emoji_pattern.sub(r'', z)
+    z = remove_emoji(z)
+    #print(z)
+    
+
+    #tokenize
+    from pyarabic.araby import tokenize
+    z = tokenize(z)
+    #print(z)
+        
+      
+    from nltk.corpus import stopwords
+    stopwords=set(stopwords.words('arabic'))
+    original_words = []
+    for word in z: 
+        if word not in stopwords:
+            original_words.append(word)
+    z =' '.join(original_words)  
+    #print(z)
+      
+        
+    z = re.sub('[?؟!@#$%&*+~\/=><]+^' , '' , str(z)) # Remove some of special chars 
+    z = re.sub(r'[a-zA-Z?]', '', str(z)).strip() # remove english chars 
+    z = re.sub('[\\s]+'," ",str(z)) # Remove all spaces
+    z = z.replace("_" , ' ') #Remove underscore
+    z = z.replace("ـ" , '') # Remove Arabic tatwelah
+    z = z.replace('"','')# Remove "
+    z = z.replace("''",'')# Remove ''
+    z = z.replace("'",'')# Remove '
+    z = z.replace(".",'')# Remove .
+    z = z.replace(",",'')# Remove ,
+    z = z.replace(":",' ')# Remove :
+    z = re.sub(r" ?\([^)]+\)", "", str(z))  #Remove text between ()
+    z = z.strip() # Trim input string
+    #print(z)
+
+    
+    #remove punctuation 
+    import string
+    string.punctuation
+    pun=string.punctuation + "؟" + "،" +"“”" + "؛" 
+    z = z.translate(str.maketrans('','',pun))
+    #print(z)
+    
+    #remove numbers
+    z = re.sub("u....", "",z)
+    z = re.sub("\d", "",z)
+    z = re.sub("-", "",z)
+    #print(z)
+    
+    #farasa stemmer
+    from farasa.stemmer import FarasaStemmer
+    stemmer = FarasaStemmer()
+    stemmed = stemmer.stem(z)
+    z = stemmed
+    #print(z)
+
+    #df['ASCII'] = df['TweetText'].apply(lambda val: val.encode('utf-8').decode('unicode_escape'))
+    #df['Preproceesed'] = df['ASCII'].apply(lambda val: preprocess(val))
+
+    return (z)
+
+
+
+"""new_train_df, dev_df, test_df =  _load_data()
+
+test_df['ASCII'] = test_df['TweetText'].apply(lambda val: val.encode('utf-8').decode('unicode_escape'))
+test_df['Preproceesed'] = test_df['ASCII'].apply(lambda val: preprocess(val))
+
+new_train_df['ASCII'] = new_train_df['TweetText'].apply(lambda val: val.encode('utf-8').decode('unicode_escape'))
+new_train_df['Preproceesed'] = new_train_df['ASCII'].apply(lambda val: preprocess(val))
+
+dev_df['ASCII'] = dev_df['TweetText'].apply(lambda val: val.encode('utf-8').decode('unicode_escape'))
+dev_df['Preproceesed'] = dev_df['ASCII'].apply(lambda val: preprocess(val))"""
+
+
+
+
+
+def _extract_twitter_data(filepath, pickle_filename):
+    print("Parsing data from {0} ...".format(filepath))
+
+    ps = PorterStemmer()
+
+    regex_pattern = "([^\t]+)\t([-]?\d+\.\d+)\t([-]?\d+\.\d+)\t(.+)"
+    data = []
+    with io.open(filepath, 'r', encoding="utf-8") as file:
+        data.extend(
+            [[match.group(1), match.group(2), match.group(3), match.group(4)] for line in file for match in
+             [re.search(regex_pattern, line.strip())] if match])
+
+    parsed_data = []
+    geocoder = rg.ReverseGeocode()
+    total_lines = len(data)
+    percent_pt = math.ceil(total_lines / 1000)
+    now = time.time()
+    start = now
+
+    for i in range(0, len(data)):
+        if (i % math.floor(percent_pt) == 0):
+            now = time.time()
+            if i != 0:
+                time_per_unit = (now - start) / i
+            else:
+                time_per_unit = 99
+            eta = time_per_unit * (total_lines - i)
+            if eta > 3600:
+                eta_format = '%d:%02d:%02d' % (eta // 3600, (eta % 3600) // 60, eta % 60)
+            elif eta > 60:
+                eta_format = '%d:%02d' % (eta // 60, eta % 60)
+            else:
+                eta_format = '%ds' % eta
+
+            info = "\r{0:.2f}% complete ({1:,}/{2:,}). ETA: {3}           ".format(i / percent_pt / 10, i, total_lines,
+                                                                                   eta_format)
+            print(info, end='')
+
+        username = data[i][0]
+        state_str = geocoder.reverse_geocode_state((data[i][1], data[i][2]))
+        if not state_str:
+            continue
+
+        tweets = data[i][3]
+        words = word_tokenize(tweets)
+        words = (ps.stem(re.sub('(.)\\1{2,}', '\\1\\1', w)) for w in words)
+        tweets = ' '.join(words)
+
+        state = geocoder.get_state_index(state_str)
+        region = geocoder.get_state_region(state_str)
+        region_str = geocoder.get_state_region_name(state_str)
+        row = (username, tweets, state, region, state_str, region_str)
+        parsed_data.append(row)
+
+    if not path.exists(path.dirname(path.abspath(pickle_filename))):
+        makedirs(path.dirname(path.abspath(pickle_filename)))
+
+    with open(pickle_filename, 'wb') as handle:
+        pickle.dump(parsed_data, handle)
+    print("\r100% complete...")
+
+
+if __name__ == '__main__':
+    _extract_twitter_data(_TWITTER_DEV_DATA, _TWITTER_PARSED_DEV_DATA)
+    _extract_twitter_data(_TWITTER_TEST_DATA, _TWITTER_PARSED_TEST_DATA)
+    _extract_twitter_data(_TWITTER_TRAIN_DATA, _TWITTER_PARSED_TRAIN_DATA)
